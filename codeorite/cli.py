@@ -331,7 +331,7 @@ def run_cli(args_list: Optional[List[str]] = None) -> int:
                 sys.stderr.write(f"Error: {str(e)}\n")
                 return 1
 
-        except (PermissionError, OSError) as e:
+        except OSError as e:
             # Config file permission errors get code 1
             sys.stderr.write(f"Configuration error: {str(e)}\n")
             return 1
