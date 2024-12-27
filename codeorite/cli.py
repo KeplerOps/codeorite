@@ -6,6 +6,7 @@ Key features:
 - Config file loading with YAML support
 - Input validation for paths, languages, and extensions
 - Error handling with appropriate exit codes
+- Comprehensive logging support
 
 Exit codes:
     0: Success
@@ -21,7 +22,11 @@ from typing import List, NoReturn, Optional, Union
 import yaml
 
 from codeorite.config import DEFAULT_CONFIG_FILE, SUPPORTED_LANGUAGES, CodeoriteConfig
+from codeorite.logging import get_logger, setup_logging
 from codeorite.main import pack_repository
+
+# Initialize logger for this module
+logger = get_logger(__name__)
 
 
 class ValidationError(Exception):
@@ -52,15 +57,21 @@ def validate_directory(path: str) -> str:
         path: Directory path to validate
 
     Returns:
-        Validated path
+        Validated path (absolute)
 
     Raises:
         ValidationError: If directory doesn't exist
         PermissionError: If directory isn't accessible
     """
-    if not os.path.isdir(path):
+    abs_path = os.path.abspath(path)
+    if not os.path.isdir(abs_path):
         raise ValidationError(f"Directory does not exist: {path}")
-    return path
+    try:
+        # Test if directory is readable
+        os.listdir(abs_path)
+    except PermissionError as e:
+        raise PermissionError(f"Permission denied accessing directory: {path}") from e
+    return abs_path
 
 
 def validate_output_file(path: Optional[str]) -> Optional[str]:
@@ -255,6 +266,33 @@ def create_argument_parser() -> argparse.ArgumentParser:
         nargs="*",
         help="List of lines to prepend as custom instructions.",
     )
+
+    # Add logging-related arguments
+    log_group = parser.add_argument_group("Logging options")
+    log_group.add_argument(
+        "--log-level",
+        choices=["DEBUG", "VERBOSE", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        default="INFO",
+        help="Set the logging level (default: INFO)",
+    )
+    log_group.add_argument(
+        "--log-file",
+        type=str,
+        help="Write logs to specified file in addition to console",
+    )
+    log_group.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Enable verbose output (equivalent to --log-level VERBOSE)",
+    )
+    log_group.add_argument(
+        "-q",
+        "--quiet",
+        action="store_true",
+        help="Suppress all output except errors (equivalent to --log-level ERROR)",
+    )
+
     return parser
 
 
@@ -280,77 +318,81 @@ def update_config_from_args(config: CodeoriteConfig, args: argparse.Namespace) -
 
 
 def run_cli(args_list: Optional[List[str]] = None) -> int:
-    """Run the CLI with the given arguments.
-
-    This is the main entry point for programmatic CLI usage.
-    Handles argument parsing, validation, and repository packing.
+    """Run the CLI application.
 
     Args:
-        args_list: Command line arguments (uses sys.argv[1:] if None)
+        args_list: Optional list of command line arguments (for testing)
 
     Returns:
-        Exit code:
-            0: Success
-            1: Validation/config error (including config file permission errors)
-            2: Repository packing permission error
-
-    Example:
-        >>> run_cli(['--root', '.', '--languages-included', 'python'])
-        0
+        Exit code (0 for success, non-zero for error)
     """
     try:
         parser = create_argument_parser()
         args = parser.parse_args(args_list)
 
-        # Validate root directory early
-        validate_directory(args.root)
+        # Configure logging based on arguments
+        if args.quiet:
+            log_level = "ERROR"
+        elif args.verbose:
+            log_level = "VERBOSE"
+        else:
+            log_level = args.log_level
 
+        setup_logging(log_level=log_level, log_file=args.log_file)
+        logger.debug("CLI arguments: %s", vars(args))
+
+        # Validate root directory
         try:
-            # Load and validate configuration
+            root_dir = validate_directory(args.root)
+            logger.info("Using repository root: %s", root_dir)
+        except ValidationError as e:
+            logger.error("Invalid root directory: %s", e)
+            return 1
+        except PermissionError as e:
+            logger.error("Permission error accessing root directory: %s", e)
+            return 2
+
+        # Load and validate configuration
+        try:
             config_data = load_config_file(args.config)
-            config = (
-                CodeoriteConfig.from_file(args.config)
-                if config_data
-                else CodeoriteConfig()
-            )
-
-            # Update config with CLI arguments
+            logger.debug("Loaded configuration: %s", config_data)
+            config = CodeoriteConfig.from_dict(config_data or {})
             update_config_from_args(config, args)
-
-            # Validate final configuration
             validate_config(config)
-
-            try:
-                # Pack repository - only repository packing permission errors get code 2
-                pack_repository(os.path.abspath(args.root), config)
-                return 0
-            except PermissionError as e:
-                sys.stderr.write(f"Permission denied: {e}\n")
-                return 2
-            except Exception as e:
-                sys.stderr.write(f"Error: {str(e)}\n")
-                return 1
-
-        except OSError as e:
-            # Config file permission errors get code 1
-            sys.stderr.write(f"Configuration error: {str(e)}\n")
+            logger.info("Configuration validated successfully")
+        except ValidationError as e:
+            logger.error("Configuration error: %s", e)
             return 1
 
-    except ValidationError as e:
-        sys.stderr.write(f"Validation error: {str(e)}\n")
-        return 1
+        # Execute main functionality
+        try:
+            logger.info("Starting repository packing")
+            pack_repository(root_dir, config)
+            logger.info("Repository packing completed successfully")
+            return 0
+        except PermissionError as e:
+            logger.error("Permission error during repository packing: %s", e)
+            return 2
+        except Exception as e:
+            logger.exception("Error during repository packing")
+            return 1
+
     except Exception as e:
-        sys.stderr.write(f"Unexpected error: {str(e)}\n")
+        logger.exception("Unexpected error occurred")
         return 1
 
 
 def main() -> NoReturn:
-    """Main entry point for the CLI.
-
-    Wraps run_cli() to handle system exit.
-    This is the function called when running `codeorite` from the command line.
-    """
-    sys.exit(run_cli())
+    """Main entry point for the CLI application."""
+    try:
+        exit_code = run_cli()
+        sys.exit(exit_code)
+    except KeyboardInterrupt:
+        logger.info("Operation cancelled by user")
+        sys.exit(130)  # Standard exit code for SIGINT
+    except Exception as e:
+        logger.exception("Fatal error occurred")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
