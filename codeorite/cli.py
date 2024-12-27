@@ -149,7 +149,7 @@ def validate_languages(langs: Optional[List[str]]) -> Optional[List[str]]:
     return langs
 
 
-def validate_config(config: CodeoriteConfig, args) -> None:
+def validate_config(config: CodeoriteConfig) -> None:
     """Validate configuration consistency.
 
     Checks for:
@@ -158,7 +158,6 @@ def validate_config(config: CodeoriteConfig, args) -> None:
 
     Args:
         config: Configuration to validate
-        args: Parsed CLI arguments
 
     Raises:
         ValidationError: If configuration is inconsistent
@@ -176,24 +175,38 @@ def validate_config(config: CodeoriteConfig, args) -> None:
         raise ValidationError("Cannot include and exclude the same extension")
 
 
-def run_cli(args_list: Optional[List[str]] = None) -> int:
-    """Run the CLI with the given arguments.
-
-    This is the main entry point for programmatic CLI usage.
-    Handles argument parsing, validation, and repository packing.
+def load_config_file(config_path: str) -> Union[dict, None]:
+    """Load and parse YAML configuration file.
 
     Args:
-        args_list: Command line arguments (uses sys.argv[1:] if None)
+        config_path: Path to YAML config file
 
     Returns:
-        Exit code:
-            0: Success
-            1: Validation/config error
-            2: Permission error
+        Parsed config dict or None if file doesn't exist
 
-    Example:
-        >>> run_cli(['--root', '.', '--languages-included', 'python'])
-        0
+    Raises:
+        ValidationError: If config file is invalid
+    """
+    if not os.path.exists(config_path):
+        if config_path == DEFAULT_CONFIG_FILE:
+            return None
+        raise ValidationError(f"Config file not found: {config_path}")
+
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+            if data is not None and not isinstance(data, dict):
+                raise ValidationError(f"Invalid config file format: {config_path}")
+            return data
+    except yaml.YAMLError as e:
+        raise ValidationError(f"Error parsing config file: {e}")
+
+
+def create_argument_parser() -> argparse.ArgumentParser:
+    """Create and configure the argument parser.
+
+    Returns:
+        Configured argument parser
     """
     parser = argparse.ArgumentParser(
         description="Package a repository into a single text file respecting .gitignore.",
@@ -242,64 +255,85 @@ def run_cli(args_list: Optional[List[str]] = None) -> int:
         nargs="*",
         help="List of lines to prepend as custom instructions.",
     )
+    return parser
 
+
+def update_config_from_args(config: CodeoriteConfig, args: argparse.Namespace) -> None:
+    """Update configuration with command line arguments.
+
+    Args:
+        config: Configuration object to update
+        args: Parsed command line arguments
+    """
+    if args.output_file is not None:
+        config.output_file = validate_output_file(args.output_file)
+    if args.languages_included is not None:
+        config.languages_included = validate_languages(args.languages_included)
+    if args.languages_excluded is not None:
+        config.languages_excluded = validate_languages(args.languages_excluded)
+    if args.includes is not None:
+        config.includes = validate_extensions(args.includes)
+    if args.excludes is not None:
+        config.excludes = validate_extensions(args.excludes)
+    if args.custom_instructions is not None:
+        config.custom_instructions = args.custom_instructions
+
+
+def run_cli(args_list: Optional[List[str]] = None) -> int:
+    """Run the CLI with the given arguments.
+
+    This is the main entry point for programmatic CLI usage.
+    Handles argument parsing, validation, and repository packing.
+
+    Args:
+        args_list: Command line arguments (uses sys.argv[1:] if None)
+
+    Returns:
+        Exit code:
+            0: Success
+            1: Validation/config error (including config file permission errors)
+            2: Repository packing permission error
+
+    Example:
+        >>> run_cli(['--root', '.', '--languages-included', 'python'])
+        0
+    """
     try:
+        parser = create_argument_parser()
         args = parser.parse_args(args_list)
 
+        # Validate root directory early
         validate_directory(args.root)
 
         try:
-            if args.config != DEFAULT_CONFIG_FILE and not os.path.exists(args.config):
-                sys.stderr.write(f"Error: Config file not found: {args.config}\n")
+            # Load and validate configuration
+            config_data = load_config_file(args.config)
+            config = (
+                CodeoriteConfig.from_file(args.config)
+                if config_data
+                else CodeoriteConfig()
+            )
+
+            # Update config with CLI arguments
+            update_config_from_args(config, args)
+
+            # Validate final configuration
+            validate_config(config)
+
+            try:
+                # Pack repository - only repository packing permission errors get code 2
+                pack_repository(os.path.abspath(args.root), config)
+                return 0
+            except PermissionError as e:
+                sys.stderr.write(f"Permission denied: {e}\n")
+                return 2
+            except Exception as e:
+                sys.stderr.write(f"Error: {str(e)}\n")
                 return 1
 
-            with open(args.config, "r", encoding="utf-8") as f:
-                try:
-                    data = yaml.safe_load(f)
-                    if data is not None and not isinstance(data, dict):
-                        sys.stderr.write(
-                            f"Error: Invalid config file format: {args.config}\n"
-                        )
-                        return 1
-                except yaml.YAMLError as e:
-                    sys.stderr.write(f"Error parsing config file: {e}\n")
-                    return 1
-
-            config = CodeoriteConfig.from_file(args.config)
-
-        except FileNotFoundError:
-            if args.config == DEFAULT_CONFIG_FILE:
-                config = CodeoriteConfig()
-            else:
-                sys.stderr.write(f"Error: Config file not found: {args.config}\n")
-                return 1
-        except Exception as e:
-            sys.stderr.write(f"Error loading config file: {e}\n")
-            return 1
-
-        if args.output_file is not None:
-            config.output_file = validate_output_file(args.output_file)
-        if args.languages_included is not None:
-            config.languages_included = validate_languages(args.languages_included)
-        if args.languages_excluded is not None:
-            config.languages_excluded = validate_languages(args.languages_excluded)
-        if args.includes is not None:
-            config.includes = validate_extensions(args.includes)
-        if args.excludes is not None:
-            config.excludes = validate_extensions(args.excludes)
-        if args.custom_instructions is not None:
-            config.custom_instructions = args.custom_instructions
-
-        validate_config(config, args)
-
-        try:
-            pack_repository(os.path.abspath(args.root), config)
-            return 0
-        except PermissionError as e:
-            sys.stderr.write(f"Permission denied: {e}\n")
-            return 2
-        except Exception as e:
-            sys.stderr.write(f"Error: {str(e)}\n")
+        except (PermissionError, OSError) as e:
+            # Config file permission errors get code 1
+            sys.stderr.write(f"Configuration error: {str(e)}\n")
             return 1
 
     except ValidationError as e:
