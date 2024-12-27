@@ -15,11 +15,13 @@ from typing import List, Optional, Set, Tuple
 
 import yaml
 
-# Default configuration values
+from codeorite.logging import get_logger
+
+logger = get_logger(__name__)
+
 DEFAULT_CONFIG_FILE = "codeorite_config.yaml"
 DEFAULT_OUTPUT_FILE = "output.txt"
 
-# Mapping of supported languages to their file extensions
 SUPPORTED_LANGUAGES = {
     "python": [".py"],
     "rust": [".rs"],
@@ -73,6 +75,15 @@ class CodeoriteConfig:
         self.excludes = excludes or []
         self.custom_instructions = custom_instructions or []
 
+        logger.debug(
+            "Created configuration: output=%s, langs_in=%s, langs_ex=%s, includes=%s, excludes=%s",
+            output_file,
+            languages_included,
+            languages_excluded,
+            includes,
+            excludes,
+        )
+
     @classmethod
     def from_file(cls, config_path: str) -> "CodeoriteConfig":
         """Create configuration from YAML file.
@@ -89,20 +100,44 @@ class CodeoriteConfig:
         Example:
             >>> config = CodeoriteConfig.from_file('codeorite_config.yaml')
         """
+        logger.debug("Loading configuration from %s", config_path)
+
         try:
             if not os.path.exists(config_path):
+                logger.info("Config file not found at %s, using defaults", config_path)
                 return cls()
 
             with open(config_path, "r", encoding="utf-8") as f:
                 try:
                     data = yaml.safe_load(f) or {}
                     if not isinstance(data, dict):
+                        logger.warning(
+                            "Invalid config format in %s (not a dictionary), using defaults",
+                            config_path,
+                        )
                         return cls()
+                    logger.info("Successfully loaded config from %s", config_path)
+                    logger.debug("Config data: %s", data)
                     return cls(**data)
-                except yaml.YAMLError:
+                except yaml.YAMLError as e:
+                    logger.warning("YAML parsing error in %s: %s", config_path, e)
                     return cls()
-        except (IOError, UnicodeError):
+        except (IOError, UnicodeError) as e:
+            logger.warning("Error reading config file %s: %s", config_path, e)
             return cls()
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "CodeoriteConfig":
+        """Create configuration from a dictionary.
+
+        Args:
+            data: Dictionary containing configuration values
+
+        Returns:
+            CodeoriteConfig instance
+        """
+        logger.debug("Creating configuration from dictionary: %s", data)
+        return cls(**data)
 
     def resolve_extensions(self) -> Tuple[Set[str], Set[str]]:
         """Resolve included and excluded file extensions.
@@ -126,27 +161,38 @@ class CodeoriteConfig:
         for lang in self.languages_included:
             lang_lower = lang.lower()
             if lang_lower in {k.lower() for k in SUPPORTED_LANGUAGES}:
-                includes.update(
-                    SUPPORTED_LANGUAGES[
-                        next(k for k in SUPPORTED_LANGUAGES if k.lower() == lang_lower)
-                    ]
+                lang_key = next(
+                    k for k in SUPPORTED_LANGUAGES if k.lower() == lang_lower
                 )
+                exts = SUPPORTED_LANGUAGES[lang_key]
+                includes.update(exts)
+                logger.debug("Added extensions for language %s: %s", lang, exts)
 
         # Add extensions from excluded languages
         for lang in self.languages_excluded:
             lang_lower = lang.lower()
             if lang_lower in {k.lower() for k in SUPPORTED_LANGUAGES}:
-                excludes.update(
-                    SUPPORTED_LANGUAGES[
-                        next(k for k in SUPPORTED_LANGUAGES if k.lower() == lang_lower)
-                    ]
+                lang_key = next(
+                    k for k in SUPPORTED_LANGUAGES if k.lower() == lang_lower
+                )
+                exts = SUPPORTED_LANGUAGES[lang_key]
+                excludes.update(exts)
+                logger.debug(
+                    "Added excluded extensions for language %s: %s", lang, exts
                 )
 
         # Add explicit includes/excludes
-        includes.update(self.includes)
-        excludes.update(self.excludes)
+        if self.includes:
+            logger.debug("Adding explicit includes: %s", self.includes)
+            includes.update(self.includes)
+        if self.excludes:
+            logger.debug("Adding explicit excludes: %s", self.excludes)
+            excludes.update(self.excludes)
 
         # Excludes take precedence over includes
         includes -= excludes
 
+        logger.debug(
+            "Final resolved extensions - includes: %s, excludes: %s", includes, excludes
+        )
         return includes, excludes
