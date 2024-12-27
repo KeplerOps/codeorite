@@ -66,7 +66,7 @@ class TestLogging(unittest.TestCase):
         stderr_handlers = [h for h in root_logger.handlers if h.stream == sys.stderr]
         self.assertEqual(len(stdout_handlers), 1)
         self.assertEqual(len(stderr_handlers), 1)
-        self.assertEqual(stdout_handlers[0].level, logging.DEBUG)
+        self.assertEqual(stdout_handlers[0].level, logging.WARNING)
         self.assertEqual(stderr_handlers[0].level, logging.WARNING)
 
     def test_setup_logging_file(self):

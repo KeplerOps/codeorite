@@ -4,12 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "codeorite"
-version = "0.1.0"
+version = "0.2.1"
 description = "A tool to package a repository into a single text file while respecting .gitignore."
 authors = [
     {name = "Brad Edwards", email = "brad@keplerops.com"}
 ]
-license = "MIT"
+license = {text = "MIT"}
 keywords = ["pack", "repository", "gitignore", "language includes", "tree"]
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -23,6 +23,9 @@ dependencies = [
     "pathspec>=0.9.0",
     "PyYAML>=6.0",
 ]
+
+[project.scripts]
+codeorite = "codeorite.cli:main"
 
 [project.optional-dependencies]
 dev = [

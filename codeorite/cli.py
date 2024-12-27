@@ -272,8 +272,8 @@ def create_argument_parser() -> argparse.ArgumentParser:
     log_group.add_argument(
         "--log-level",
         choices=["DEBUG", "VERBOSE", "INFO", "WARNING", "ERROR", "CRITICAL"],
-        default="INFO",
-        help="Set the logging level (default: INFO)",
+        default="WARNING",
+        help="Set the logging level (default: WARNING)",
     )
     log_group.add_argument(
         "--log-file",
