@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "codeorite"
-version = "0.2.3"
+version = "0.2.4"
 description = "A tool to package a repository into a single text file while respecting .gitignore."
 authors = [
     {name = "Brad Edwards", email = "brad@keplerops.com"}
