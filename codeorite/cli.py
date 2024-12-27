@@ -390,7 +390,7 @@ def main() -> NoReturn:
     except KeyboardInterrupt:
         logger.info("Operation cancelled by user")
         sys.exit(130)  # Standard exit code for SIGINT
-    except Exception as e:
+    except Exception:
         logger.exception("Fatal error occurred")
         sys.exit(1)
 

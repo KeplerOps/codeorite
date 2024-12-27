@@ -59,8 +59,74 @@ def is_ignored_by_gitignore(file_path, spec, root_path):
     return is_ignored
 
 
-def build_directory_tree(root_dir, included_files):
+def _is_path_included(path: Path, included_paths: set[Path]) -> bool:
+    """Check if a path or any of its subdirectories are included.
+
+    Args:
+        path: Path to check
+        included_paths: Set of paths that are included
+
+    Returns:
+        bool: True if path or any subdirectory is included
+    """
+    return path in included_paths or any(
+        str(p).startswith(str(path)) for p in included_paths
+    )
+
+
+def _format_tree_line(current_path: Path, root_path: Path) -> str:
+    """Format a single line in the directory tree.
+
+    Args:
+        current_path: Current directory path
+        root_path: Root directory path
+
+    Returns:
+        str: Formatted tree line with proper indentation
+    """
+    try:
+        rel_path = current_path.relative_to(root_path)
+        level = len(rel_path.parts) if str(rel_path) != "." else 0
+        indent = "    " * level
+        dir_name = current_path.name or root_path.name
+        return f"{indent}{dir_name}/"
+    except ValueError as e:
+        logger.warning("Could not determine relative path for %s: %s", current_path, e)
+        return ""
+
+
+def _check_directory_inclusion(
+    current_path: Path, files: list[str], dirs: list[str], included_paths: set[Path]
+) -> bool:
+    """Check if a directory should be included in the tree.
+
+    Args:
+        current_path: Current directory path
+        files: List of files in the directory
+        dirs: List of subdirectories
+        included_paths: Set of included file paths
+
+    Returns:
+        bool: True if directory should be included
+    """
+    # Check if any files in this directory are included
+    if any(
+        _is_path_included(Path(current_path, f).resolve(), included_paths)
+        for f in files
+    ):
+        return True
+
+    # Check if any subdirectories contain included files
+    return any(
+        _is_path_included(Path(current_path, d).resolve(), included_paths) for d in dirs
+    )
+
+
+def build_directory_tree(root_dir: str, included_files: list[str]) -> str:
     """Build a directory tree string that only includes folders containing included files.
+
+    This function creates a visual representation of the directory structure,
+    showing only directories that contain files that were selected for inclusion.
 
     Args:
         root_dir: Repository root directory
@@ -76,33 +142,12 @@ def build_directory_tree(root_dir, included_files):
 
     for current_root, dirs, files in os.walk(root_dir):
         current_path = Path(current_root).resolve()
-        sub_included = False
 
-        for f in files:
-            if Path(current_root, f).resolve() in included_paths:
-                sub_included = True
-                break
-
-        for d in dirs:
-            subdir_path = Path(current_root, d).resolve()
-            if any(str(p).startswith(str(subdir_path)) for p in included_paths):
-                sub_included = True
-                break
-
-        if sub_included:
-            try:
-                # Calculate relative path from root to current path
-                rel_path = current_path.relative_to(root_path)
-                level = len(rel_path.parts) if str(rel_path) != "." else 0
-                indent = "    " * level
-                dir_name = current_path.name or root_path.name
-                tree_lines.append(f"{indent}{dir_name}/")
-                logger.debug("Added directory to tree: %s", dir_name)
-            except ValueError as e:
-                logger.warning(
-                    "Could not determine relative path for %s: %s", current_path, e
-                )
-                continue
+        if _check_directory_inclusion(current_path, files, dirs, included_paths):
+            tree_line = _format_tree_line(current_path, root_path)
+            if tree_line:
+                tree_lines.append(tree_line)
+                logger.debug("Added directory to tree: %s", current_path.name)
 
     return "\n".join(tree_lines)
 
