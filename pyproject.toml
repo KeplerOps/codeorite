@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "codeorite"
+version = "0.1.0"
+description = "A tool to package a repository into a single text file while respecting .gitignore."
+authors = [
+    {name = "Brad Edwards", email = "brad@keplerops.com"}
+]
+license = "MIT"
+keywords = ["pack", "repository", "gitignore", "language includes", "tree"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+]
+readme = "README.md"
+requires-python = ">=3.7"
+
+# Note: 'pathspec' is required for .gitignore parsing
+dependencies = [
+    "pathspec>=0.9.0",
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pathspec>=0.9.0",
+    "pyyaml>=6.0"
+]
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "-ra -q"
+testpaths = [
+    "tests",
+]
