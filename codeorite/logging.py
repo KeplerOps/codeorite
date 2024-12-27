@@ -17,13 +17,14 @@ import sys
 import threading
 import warnings
 from pathlib import Path
-from typing import Optional, Set
+from typing import Optional, Set, Union
 
 DEFAULT_LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 DEFAULT_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 VERBOSE_LEVEL = 15  # Between DEBUG and INFO
 logging.addLevelName(VERBOSE_LEVEL, "VERBOSE")
+setattr(logging, "VERBOSE", VERBOSE_LEVEL)
 
 _handlers: Set[logging.Handler] = set()
 _handler_lock = threading.Lock()
@@ -36,22 +37,22 @@ def _cleanup_handlers():
     handling any errors that occur during cleanup without silently ignoring them.
     """
     with _handler_lock:
+        root_logger = logging.getLogger()
         for handler in _handlers.copy():
             try:
+                if handler in root_logger.handlers:
+                    root_logger.removeHandler(handler)
                 handler.close()
             except (IOError, OSError) as e:
-                # Log specific I/O errors that might occur during cleanup
                 warnings.warn(
                     f"Error closing log handler {handler}: {e}", RuntimeWarning
                 )
             except Exception as e:
-                # Log unexpected errors without failing
                 warnings.warn(
                     f"Unexpected error closing log handler {handler}: {e}",
                     RuntimeWarning,
                 )
             finally:
-                # Always remove the handler from our set, even if closing failed
                 _handlers.discard(handler)
 
 
@@ -59,25 +60,36 @@ atexit.register(_cleanup_handlers)
 
 
 def setup_logging(
-    log_level: str = "INFO",
+    log_level: Union[str, int] = "INFO",
     log_file: Optional[str] = None,
     log_format: str = DEFAULT_LOG_FORMAT,
 ) -> None:
     """Configure the logging system.
 
     Args:
-        log_level: Minimum logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+        log_level: Minimum logging level (DEBUG, VERBOSE, INFO, WARNING, ERROR, CRITICAL)
+                  Can be string name or integer constant
         log_file: Optional file path for logging to file
         log_format: Format string for log messages
     """
     root_logger = logging.getLogger()
-    root_logger.setLevel(log_level)
+
+    # Handle level input
+    if isinstance(log_level, str):
+        level = getattr(logging, log_level.upper(), None)
+        if not isinstance(level, int):
+            warnings.warn(f"Invalid log level {log_level}, using INFO", RuntimeWarning)
+            level = logging.INFO
+    else:
+        level = log_level
+
+    root_logger.setLevel(level)
 
     with _handler_lock:
-        # Clean up existing handlers
         for handler in _handlers.copy():
             try:
-                root_logger.removeHandler(handler)
+                if handler in root_logger.handlers:
+                    root_logger.removeHandler(handler)
                 handler.close()
             except Exception as e:
                 warnings.warn(
@@ -88,14 +100,12 @@ def setup_logging(
 
         formatter = logging.Formatter(log_format, DEFAULT_DATE_FORMAT)
 
-        # Console handler (stdout for INFO and below)
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setFormatter(formatter)
-        console_handler.setLevel(logging.DEBUG)
+        console_handler.setLevel(logging.DEBUG)  # Allow all messages through
         root_logger.addHandler(console_handler)
         _handlers.add(console_handler)
 
-        # Error handler (stderr for WARNING and above)
         error_handler = logging.StreamHandler(sys.stderr)
         error_handler.setFormatter(formatter)
         error_handler.setLevel(logging.WARNING)
@@ -111,7 +121,7 @@ def setup_logging(
 
                 file_handler = logging.FileHandler(log_file, encoding="utf-8")
                 file_handler.setFormatter(formatter)
-                file_handler.setLevel(logging.DEBUG)
+                file_handler.setLevel(logging.DEBUG)  # Allow all messages through
                 root_logger.addHandler(file_handler)
                 _handlers.add(file_handler)
             except (IOError, OSError) as e:
@@ -129,4 +139,6 @@ def get_logger(name: str) -> logging.Logger:
     Returns:
         Configured logger instance
     """
-    return logging.getLogger(name)
+    logger = logging.getLogger(name)
+    logger.setLevel(logging.DEBUG)
+    return logger
