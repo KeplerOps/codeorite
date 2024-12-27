@@ -1,0 +1,323 @@
+"""CLI interface for Codeorite.
+
+This module handles command-line argument parsing and validation for the repository packing tool.
+Key features:
+- Argument parsing with sane defaults
+- Config file loading with YAML support
+- Input validation for paths, languages, and extensions
+- Error handling with appropriate exit codes
+
+Exit codes:
+    0: Success
+    1: Validation/config error
+    2: Permission error
+"""
+
+import argparse
+import os
+import sys
+from typing import List, NoReturn, Optional, Union
+
+import yaml
+
+from codeorite.config import DEFAULT_CONFIG_FILE, SUPPORTED_LANGUAGES, CodeoriteConfig
+from codeorite.main import pack_repository
+
+
+class ValidationError(Exception):
+    """Raised when input validation fails.
+
+    Used to distinguish validation errors (bad input) from system errors (permissions, IO).
+    These result in exit code 1 and a user-friendly error message.
+    """
+
+    pass
+
+
+def exit_with_error(message: str, code: int = 1) -> NoReturn:
+    """Exit with a formatted error message and code.
+
+    Args:
+        message: Error message to display to stderr
+        code: Exit code (1 for validation, 2 for permissions)
+    """
+    sys.stderr.write(f"{message}\n")
+    sys.exit(code)
+
+
+def validate_directory(path: str) -> str:
+    """Validate that a directory exists and is accessible.
+
+    Args:
+        path: Directory path to validate
+
+    Returns:
+        Validated path
+
+    Raises:
+        ValidationError: If directory doesn't exist
+        PermissionError: If directory isn't accessible
+    """
+    if not os.path.isdir(path):
+        raise ValidationError(f"Directory does not exist: {path}")
+    return path
+
+
+def validate_output_file(path: Optional[str]) -> Optional[str]:
+    """Validate output file path.
+
+    Args:
+        path: Output file path to validate
+
+    Returns:
+        Validated path
+
+    Raises:
+        ValidationError: If path is empty or None
+        PermissionError: If parent directory isn't writable
+    """
+    if path is None or not path:
+        raise ValidationError("Output file path cannot be empty")
+    return path
+
+
+def validate_extension(ext: str) -> str:
+    """Validate file extension format.
+
+    Args:
+        ext: File extension (e.g., '.py', '.rs')
+
+    Returns:
+        Validated extension
+
+    Raises:
+        ValidationError: If extension doesn't start with dot
+    """
+    if not ext.startswith("."):
+        raise ValidationError(f"Invalid extension format (must start with dot): {ext}")
+    return ext
+
+
+def validate_extensions(exts: Optional[List[str]]) -> Optional[List[str]]:
+    """Validate list of file extensions.
+
+    Args:
+        exts: List of extensions to validate
+
+    Returns:
+        List of validated extensions
+
+    Raises:
+        ValidationError: If any extension is invalid
+    """
+    if exts is not None:
+        return [validate_extension(ext) for ext in exts]
+    return exts
+
+
+def validate_language(lang: str) -> str:
+    """Validate that a language is supported.
+
+    Args:
+        lang: Language name to validate (case-insensitive)
+
+    Returns:
+        Validated language name
+
+    Raises:
+        ValidationError: If language isn't in SUPPORTED_LANGUAGES
+    """
+    if lang.lower() not in {k.lower() for k in SUPPORTED_LANGUAGES.keys()}:
+        raise ValidationError(f"Unsupported language: {lang}")
+    return lang
+
+
+def validate_languages(langs: Optional[List[str]]) -> Optional[List[str]]:
+    """Validate list of programming languages.
+
+    Args:
+        langs: List of languages to validate
+
+    Returns:
+        List of validated languages
+
+    Raises:
+        ValidationError: If any language is invalid
+    """
+    if langs is not None:
+        return [validate_language(lang) for lang in langs]
+    return langs
+
+
+def validate_config(config: CodeoriteConfig, args) -> None:
+    """Validate configuration consistency.
+
+    Checks for:
+    - Language conflicts (same language in include/exclude)
+    - Extension conflicts (same extension in include/exclude)
+
+    Args:
+        config: Configuration to validate
+        args: Parsed CLI arguments
+
+    Raises:
+        ValidationError: If configuration is inconsistent
+    """
+    # Check for language conflicts
+    included_langs = set(lang.lower() for lang in config.languages_included)
+    excluded_langs = set(lang.lower() for lang in config.languages_excluded)
+    if included_langs & excluded_langs:
+        raise ValidationError("Cannot include and exclude the same language")
+
+    # Check for extension conflicts
+    included_exts = set(ext.lower() for ext in config.includes)
+    excluded_exts = set(ext.lower() for ext in config.excludes)
+    if included_exts & excluded_exts:
+        raise ValidationError("Cannot include and exclude the same extension")
+
+
+def run_cli(args_list: Optional[List[str]] = None) -> int:
+    """Run the CLI with the given arguments.
+
+    This is the main entry point for programmatic CLI usage.
+    Handles argument parsing, validation, and repository packing.
+
+    Args:
+        args_list: Command line arguments (uses sys.argv[1:] if None)
+
+    Returns:
+        Exit code:
+            0: Success
+            1: Validation/config error
+            2: Permission error
+
+    Example:
+        >>> run_cli(['--root', '.', '--languages-included', 'python'])
+        0
+    """
+    parser = argparse.ArgumentParser(
+        description="Package a repository into a single text file respecting .gitignore.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "--root",
+        type=str,
+        default=".",
+        help="Root directory of the repository (default: current directory).",
+    )
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=DEFAULT_CONFIG_FILE,
+        help="Path to the YAML configuration file (default: codeorite_config.yaml).",
+    )
+    parser.add_argument(
+        "--output-file",
+        type=str,
+        default=None,
+        help="Override the output file name specified in config.",
+    )
+    parser.add_argument(
+        "--languages-included",
+        nargs="*",
+        help=f"List of languages to include (overrides config). Supported: {', '.join(SUPPORTED_LANGUAGES.keys())}",
+    )
+    parser.add_argument(
+        "--languages-excluded",
+        nargs="*",
+        help="List of languages to exclude (overrides config).",
+    )
+    parser.add_argument(
+        "--includes",
+        nargs="*",
+        help="List of explicit file extensions to include (e.g. .py, .rs).",
+    )
+    parser.add_argument(
+        "--excludes",
+        nargs="*",
+        help="List of explicit file extensions to exclude (e.g. .md, .yaml).",
+    )
+    parser.add_argument(
+        "--custom-instructions",
+        nargs="*",
+        help="List of lines to prepend as custom instructions.",
+    )
+
+    try:
+        args = parser.parse_args(args_list)
+
+        validate_directory(args.root)
+
+        try:
+            if args.config != DEFAULT_CONFIG_FILE and not os.path.exists(args.config):
+                sys.stderr.write(f"Error: Config file not found: {args.config}\n")
+                return 1
+
+            with open(args.config, "r", encoding="utf-8") as f:
+                try:
+                    data = yaml.safe_load(f)
+                    if data is not None and not isinstance(data, dict):
+                        sys.stderr.write(
+                            f"Error: Invalid config file format: {args.config}\n"
+                        )
+                        return 1
+                except yaml.YAMLError as e:
+                    sys.stderr.write(f"Error parsing config file: {e}\n")
+                    return 1
+
+            config = CodeoriteConfig.from_file(args.config)
+
+        except FileNotFoundError:
+            if args.config == DEFAULT_CONFIG_FILE:
+                config = CodeoriteConfig()
+            else:
+                sys.stderr.write(f"Error: Config file not found: {args.config}\n")
+                return 1
+        except Exception as e:
+            sys.stderr.write(f"Error loading config file: {e}\n")
+            return 1
+
+        if args.output_file is not None:
+            config.output_file = validate_output_file(args.output_file)
+        if args.languages_included is not None:
+            config.languages_included = validate_languages(args.languages_included)
+        if args.languages_excluded is not None:
+            config.languages_excluded = validate_languages(args.languages_excluded)
+        if args.includes is not None:
+            config.includes = validate_extensions(args.includes)
+        if args.excludes is not None:
+            config.excludes = validate_extensions(args.excludes)
+        if args.custom_instructions is not None:
+            config.custom_instructions = args.custom_instructions
+
+        validate_config(config, args)
+
+        try:
+            pack_repository(os.path.abspath(args.root), config)
+            return 0
+        except PermissionError as e:
+            sys.stderr.write(f"Permission denied: {e}\n")
+            return 2
+        except Exception as e:
+            sys.stderr.write(f"Error: {str(e)}\n")
+            return 1
+
+    except ValidationError as e:
+        sys.stderr.write(f"Validation error: {str(e)}\n")
+        return 1
+    except Exception as e:
+        sys.stderr.write(f"Unexpected error: {str(e)}\n")
+        return 1
+
+
+def main() -> NoReturn:
+    """Main entry point for the CLI.
+
+    Wraps run_cli() to handle system exit.
+    This is the function called when running `codeorite` from the command line.
+    """
+    sys.exit(run_cli())
+
+
+if __name__ == "__main__":
+    main()
