@@ -1,3 +1,6 @@
+[![Build](https://github.com/KeplerOps/codeorite/actions/workflows/build.yml/badge.svg)](https://github.com/KeplerOps/codeorite/actions/workflows/build.yml)
+[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=KeplerOps_codeorite&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=KeplerOps_codeorite)
+
 # Codeorite
 
 A CLI tool to package repository code into a single text file, respecting .gitignore rules.
