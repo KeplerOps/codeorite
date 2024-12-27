@@ -1,0 +1,28 @@
+repos:
+  - repo: https://github.com/pycqa/isort
+    rev: 5.13.2
+    hooks:
+      - id: isort
+        language_version: python3.10
+
+  - repo: https://github.com/psf/black
+    rev: 24.1.0
+    hooks:
+      - id: black
+        language_version: python3.10
+
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.7.7
+    hooks:
+      - id: bandit
+        args: ["-r", "-c", "pyproject.toml"]
+        additional_dependencies: ['.[toml]']
+
+  - repo: local
+    hooks:
+      - id: pytest-coverage
+        name: pytest with coverage
+        entry: pytest --cov=. --cov-report term-missing --cov-report xml:coverage-reports/coverage.xml
+        language: system
+        pass_filenames: false
+        always_run: true
