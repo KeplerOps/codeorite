@@ -60,7 +60,7 @@ atexit.register(_cleanup_handlers)
 
 
 def setup_logging(
-    log_level: Union[str, int] = "INFO",
+    log_level: Union[str, int] = "WARNING",
     log_file: Optional[str] = None,
     log_format: str = DEFAULT_LOG_FORMAT,
 ) -> None:
@@ -102,7 +102,7 @@ def setup_logging(
 
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setFormatter(formatter)
-        console_handler.setLevel(logging.DEBUG)  # Allow all messages through
+        console_handler.setLevel(level)  # Match root logger's level
         root_logger.addHandler(console_handler)
         _handlers.add(console_handler)
 
